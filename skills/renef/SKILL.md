@@ -31,11 +31,31 @@ copy blindly (offsets/signatures are target-specific).
 
 ## What you're driving
 
+- **Topology — read this before anything.** `renef` is a **host** client (your macOS/Linux shell)
+  that drives `renef_server` running **on the Android device** over an ADB-forwarded socket. You do
+  **not** run `renef` on the device, and you do **not** `adb push hook.lua` + `adb shell renef …`.
+  That on-device pattern is **only** `--local` mode (Termux/SSH on a rooted phone). Default and
+  assumed-here = host client → remote device. Lua scripts stay on the host and are sent over the
+  wire by `-l`; device-side paths apply **only** under `--local`.
 - Your Lua runs **inside the target process** (injected `libagent.so`, embedded Lua 5.4, memfd
   injection, no ptrace). `Module.*`, `Memory.*`, hook callbacks all execute in the app's address
   space — paths, PIDs, fds are the *target's*.
 - You drive it from the **CLI REPL** (`renef>`) or one-shot via `-l script.lua`.
 - **Hook/trace output is asynchronous** — you must `watch` (or launch with `-w`) or you see nothing.
+
+## Preflight (Step 0 — a gate, before you write, run, or "test" anything)
+
+Confirm the host→device chain end-to-end. Until you do, you **cannot test** — deliver the script
+as explicitly **unverified**, never as "tested/working", and never invent run output.
+
+1. `adb devices` lists exactly one authorized device (more than one → require `-d <id>`; none → stop).
+2. The `renef` client exists **on the host**: `command -v renef` (or `renef -h`).
+3. `renef_server` is running **on the device**: `adb shell pidof renef_server`. If absent, start it
+   (`adb shell su -c '/data/local/tmp/renef_server &'`) or rely on magisk-renef.
+4. Root (or gadget mode for non-root), target is ARM64, and the package is installed (`la~<name>`).
+
+A "test" = you saw real hook output via `-w`/`watch` while exercising the app — **not** that the
+script reads correctly. If any link above is missing, say which one and stop short of claiming a run.
 
 ## The loop (always follow this)
 
@@ -59,8 +79,9 @@ so hooks install before the app's `onCreate` runs.
 | Gadget (no root) | `renef -g <pid> -l hook.lua` | non-root, APK patched with `libagent.so` |
 | Local (on-device) | `renef --local -s com.pkg -l /data/local/tmp/hook.lua` | Termux/SSH, SELinux-safe |
 
-Server must run on device first (`adb shell /data/local/tmp/renef_server`, or the magisk-renef
-module auto-starts it). Engine: `trampoline` (default, any address) or `--hook=pltgot` (imported
+Every row except the last runs `renef` **on the host** against the device — only `--local` runs the
+client on-device. Server must run on device first (`adb shell /data/local/tmp/renef_server`, or the
+magisk-renef module auto-starts it). Engine: `trampoline` (default, any address) or `--hook=pltgot` (imported
 functions only). Full flag list and REPL commands → `references/cli.md`.
 
 ## Syntax Contract (ground truth — do not invent API)
@@ -142,6 +163,10 @@ end
 
 ## Self-Lint (run over every script before presenting it)
 
+- [ ] **Preflight passed** (host `renef` + `adb devices` + device `renef_server`) before any claim of
+      a test. Script invoked from the **host** (`renef -s/-a/-g …`), not `adb shell renef`/`adb push`
+      (that's `--local`-only). If preflight didn't pass, the script is labeled **unverified** — no
+      fabricated output.
 - [ ] Hook target is `(library, offset)` — **no absolute address** passed to `hook()`.
 - [ ] Offset resolved by symbol (`Module.exports/symbols`) or byte-pattern (`Memory.search`), not a
       hardcoded number — and guarded with `if not base then return end`.
